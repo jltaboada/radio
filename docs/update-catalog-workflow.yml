@@ -1,0 +1,61 @@
+# ============================================================================
+# PLANTILLA (no activa) — actualización automática del catálogo de emisoras
+# ============================================================================
+#
+# La app de Radio ES incluye un catálogo local (stations.json) generado a
+# partir de TDTChannels, por lo que funciona incluso sin llamar a la API
+# externa. Los streams de radio van caducando con el tiempo, así que conviene
+# regenerar el catálogo de vez en cuando.
+#
+# CÓMO ACTIVAR ESTE WORKFLOW (1 minuto):
+#   1. Entra en tu repositorio en GitHub → pestaña "Add file" → "Create new file".
+#   2. Nómbralo exactamente:  .github/workflows/update-catalog.yml
+#   3. Copia el contenido de este archivo y guárdalo ("Commit changes").
+#   4. Listo: se ejecutará cada lunes a las 04:23 UTC. También puedes
+#      lanzarlo a mano desde la pestaña "Actions" → "Update station catalog"
+#      → "Run workflow".
+#
+# (Se guarda como plantilla en docs/ porque el agente de esta sesión no tiene
+# permiso para crear workflows automáticamente.)
+# ============================================================================
+
+name: Update station catalog
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 4 * * 1" # lunes 04:23 UTC
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-catalog
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build catalog from TDTChannels
+        run: node scripts/build-catalog-tdt.mjs
+
+      - name: Commit stations.json if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add stations.json
+          if git diff --cached --quiet; then
+            echo "Catálogo sin cambios; nada que subir."
+          else
+            git commit -m "chore: actualizar catálogo de emisoras (auto)"
+            git push
+          fi

@@ -3,37 +3,44 @@
    Lógica principal (Vanilla JS, ES6+).
 
    Funciones principales:
-     init()               - arranque de la aplicación
-     fetchStations()      - descarga de emisoras desde radio-browser.info
-     renderStations()     - pinta la lista según pestaña y búsqueda
-     playStation(id)      - reproduce una emisora
-     toggleFavorite(id)   - marca/desmarca favoritos
-     switchTheme()        - alterna tema claro/oscuro
-     setupMediaSession()  - Media Session API (controles externos)
-     setupServiceWorker() - registra sw.js
+     init()                - arranque de la aplicación
+     loadEmbeddedCatalog() - catálogo local (stations.json, ~1000 emisoras)
+     fetchStations()       - respaldo: descarga desde radio-browser.info
+     renderStations()      - pinta la lista por tandas (render progresivo)
+     playStation(id)       - reproduce una emisora (con streams alternativos)
+     toggleFavorite(id)    - marca/desmarca favoritos
+     switchTheme()         - alterna tema claro/oscuro
+     setupMediaSession()   - Media Session API (controles externos)
+     setupServiceWorker()  - registra sw.js
    ========================================================================== */
 
 "use strict";
 
-/* ---------------------------------------------------------------------------
+/* --------------------------------------------------------------------------- 
    0. Constantes y estado global
    ------------------------------------------------------------------------- */
 
+// Catálogo embebido (generado con scripts/build-catalog-tdt.mjs a partir de
+// TDTChannels). Se carga al instante y funciona incluso sin la API externa.
+const CATALOG_PATH = "./stations.json";
+
 // Servidores públicos de radio-browser.info (rotamos en caso de fallo).
+// Solo se usan como respaldo cuando no hay catálogo embebido disponible.
 const RADIO_SERVERS = [
   "https://all.api.radio-browser.info",
   "https://de1.api.radio-browser.info",
   "https://fi1.api.radio-browser.info",
 ];
 
-const STATION_LIMIT = 100;            // nº máx de emisoras por carga
+const STATION_LIMIT = 1000;   // nº máx de emisoras desde la API en vivo
+const FETCH_PAGE = 200;       // tamaño de página de la API
+const RENDER_PAGE = 60;       // emisoras pintadas por tanda (render progresivo)
+const SEARCH_DEBOUNCE = 120;  // ms de espera tras teclear en el buscador
+
 const STORAGE_KEYS = {
-  favorites: "radioes.favorites",     // array de stationuuid
+  favorites: "radioes.favorites",     // array de ids de emisora
   theme: "radioes.theme",             // 'light' | 'dark'
 };
-
-// URL del stream por defecto si la API no aporta uno usable.
-const FALLBACK_STREAM = "https://icecast.rtve.es/radionacional.mp3";
 
 // Elementos del DOM (se rellenan en init()).
 const el = {};
@@ -41,11 +48,13 @@ const el = {};
 // Estado de la app.
 const state = {
   stations: [],           // todas las emisoras cargadas
-  favorites: [],          // IDs (stationuuid) favoritas
+  favorites: [],          // IDs favoritos
   current: null,          // emisora en reproducción
+  currentUrls: [],        // URLs del stream actual (principal + alternativas)
+  currentUrlIdx: 0,       // índice de la URL que se está probando
   currentTab: "all",      // 'all' | 'favs'
   query: "",              // texto de búsqueda
-  isLoading: false,       // bandera de carga inicial
+  renderedCount: 0,       // nº de tarjetas pintadas del filtro actual
 };
 
 /* ---------------------------------------------------------------------------
@@ -63,20 +72,20 @@ function readStorage(key, fallback) {
   }
 }
 
-/** Escribe en localStorage de forma segura. */
+/** Escribe una clave de localStorage de forma segura. */
 function writeStorage(key, value) {
   try {
     localStorage.setItem(key, JSON.stringify(value));
   } catch (e) {
-    console.warn("No se pudo guardar en localStorage:", e);
+    console.warn("No se pudo guardar localStorage:", e);
   }
 }
 
-/** Escapa texto para insertarlo de forma segura en HTML. */
+/** Escapa texto para insertarlo de forma segura en HTML (incluidas comillas). */
 function escapeHtml(str) {
   const div = document.createElement("div");
   div.textContent = String(str ?? "");
-  return div.innerHTML;
+  return div.innerHTML.replace(/"/g, "&quot;");
 }
 
 /** Normaliza un texto para búsquedas (minúsculas, sin tildes). */
@@ -92,9 +101,22 @@ function isValidStream(url) {
   return typeof url === "string" && /^https?:\/\//i.test(url);
 }
 
-/** Devuelve una URL de API con servidores alternativos. */
-function getApiBase() {
-  return RADIO_SERVERS[Math.floor(Math.random() * RADIO_SERVERS.length)];
+/** Letra inicial + tono de color determinista (avatar cuando no hay logo). */
+function letterAvatar(name) {
+  const clean = String(name || "").trim();
+  const letter = (clean[0] || "R").toUpperCase();
+  let hue = 7;
+  for (const ch of clean) hue = (hue * 31 + ch.codePointAt(0)) % 360;
+  return { letter, hue };
+}
+
+/** fetch con timeout (AbortController). */
+function fetchWithTimeout(url, ms, options = {}) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  return fetch(url, { ...options, signal: ctrl.signal }).finally(() => {
+    clearTimeout(timer);
+  });
 }
 
 /* ---------------------------------------------------------------------------
@@ -137,32 +159,79 @@ function switchTheme() {
 }
 
 /* ---------------------------------------------------------------------------
-   3. Carga de emisoras desde radio-browser.info
+   3. Carga de emisoras
    ------------------------------------------------------------------------- */
 
 /**
- * Descarga las emisoras. Por defecto: país ES, con la etiqueta "radio",
- * ordenadas por popularidad (clickcount) de mayor a menor.
+ * Carga el catálogo embebido (stations.json). Devuelve null si no existe,
+ * está corrupto o no tiene emisoras.
  */
-async function fetchStations() {
-  const params = new URLSearchParams({
-    countrycode: "ES", // España
-    tag: "radio",      // etiqueta radio
-    order: "clickcount",
-    reverse: "true",   // descendente (más populares primero)
-    hidebroken: "true",
-    limit: String(STATION_LIMIT),
-  });
+async function loadEmbeddedCatalog() {
+  try {
+    const res = await fetch(CATALOG_PATH);
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data || !Array.isArray(data.stations)) return null;
 
+    const seen = new Set();
+    const list = [];
+    for (const s of data.stations) {
+      if (!s || !s.id || !isValidStream(s.url) || seen.has(s.id)) continue;
+      seen.add(s.id);
+      let favicon = String(s.favicon || "");
+      if (favicon.startsWith("//")) favicon = "https:" + favicon;
+      list.push({
+        id: s.id,
+        name: String(s.name || "Sin nombre"),
+        url: s.url,
+        alt: Array.isArray(s.alt) ? s.alt.filter(isValidStream).slice(0, 3) : [],
+        favicon: isValidStream(favicon) ? favicon : "",
+        codec: String(s.codec || ""),
+        bitrate: Number(s.bitrate) || 0,
+        lang: String(s.lang || "es"),
+        tags: String(s.tags || ""),
+      });
+    }
+    return list.length > 0 ? list : null;
+  } catch (err) {
+    console.warn("Catálogo embebido no disponible:", err);
+    return null;
+  }
+}
+
+/**
+ * Respaldo: descarga emisoras en vivo desde radio-browser.info,
+ * por páginas y con renderizado progresivo (onBatch recibe el acumulado).
+ */
+async function fetchStations(onBatch = null) {
   let lastError;
+
   for (const base of RADIO_SERVERS) {
     try {
-      const res = await fetch(`${base}/json/stations/search?${params}`, {
-        headers: { "User-Agent": "RadioES-PWA/1.0" },
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      if (Array.isArray(data)) return data;
+      const collected = [];
+      for (let offset = 0; offset < STATION_LIMIT; offset += FETCH_PAGE) {
+        const params = new URLSearchParams({
+          countrycode: "ES",   // España
+          order: "clickcount", // popularidad (clics)
+          reverse: "true",     // más populares primero
+          hidebroken: "true",  // sin emisoras caídas
+          limit: String(FETCH_PAGE),
+          offset: String(offset),
+        });
+        const res = await fetchWithTimeout(
+          `${base}/json/stations/search?${params}`,
+          15000,
+          { headers: { "User-Agent": "RadioES-PWA/2.0" } }
+        );
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (!Array.isArray(data)) throw new Error("Respuesta inválida");
+
+        collected.push(...data);
+        if (onBatch) onBatch(collected);
+        if (data.length < FETCH_PAGE) break; // no hay más resultados
+      }
+      if (collected.length > 0) return collected;
     } catch (err) {
       lastError = err;
       console.warn("Servidor API fallido:", base, err);
@@ -171,7 +240,7 @@ async function fetchStations() {
   throw lastError || new Error("No hay servidores disponibles");
 }
 
-/** Prepara las emisoras: descarta streams inválidos y normaliza campos. */
+/** Prepara emisoras de la API: descarta streams inválidos y normaliza campos. */
 function normalizeStations(list) {
   const seen = new Set();
   return list
@@ -181,19 +250,29 @@ function normalizeStations(list) {
       seen.add(s.stationuuid);
       return true;
     })
-    .map((s) => ({
-      id: s.stationuuid,
-      name: s.name || "Sin nombre",
-      url: isValidStream(s.url_resolved) ? s.url_resolved : s.url,
-      favicon: s.favicon || s.favicon_62 || "",
-      tags: s.tags || "",
-      language: s.language || "",
-      codec: s.codec || "",
-    }));
+    .map((s) => {
+      let favicon = String(s.favicon || s.favicon_62 || "");
+      if (favicon.startsWith("//")) favicon = "https:" + favicon;
+      return {
+        id: s.stationuuid,
+        name: String(s.name || "Sin nombre").trim() || "Sin nombre",
+        url: isValidStream(s.url_resolved) ? s.url_resolved : s.url,
+        alt: [],
+        favicon: isValidStream(favicon) ? favicon : "",
+        codec: String(s.codec || "").toUpperCase(),
+        bitrate: Number(s.bitrate) || 0,
+        lang:
+          String(s.languagecodes || s.language || "")
+            .split(",")[0]
+            .trim()
+            .slice(0, 8) || "es",
+        tags: String(s.tags || ""),
+      };
+    });
 }
 
 /* ---------------------------------------------------------------------------
-   4. Renderizado de la lista
+   4. Renderizado de la lista (progresivo, por tandas)
    ------------------------------------------------------------------------- */
 
 /** Devuelve las emisoras a mostrar según pestaña y búsqueda. */
@@ -214,11 +293,10 @@ function stationCard(station) {
   const isFav = state.favorites.includes(station.id);
   const isPlaying = state.current?.id === station.id;
 
-  const logo = station.favicon
-    ? `<img src="${escapeHtml(station.favicon)}" alt="" loading="lazy"
-          onerror="this.parentNode.querySelector('.ph').style.display='grid';this.style.display='none'">`
-    : "";
-  const ph = `<span class="ph"><i class="bx bx-radio"></i></span>`;
+  const { letter, hue } = letterAvatar(station.name);
+  const logoInner = station.favicon
+    ? `<img src="${escapeHtml(station.favicon)}" alt="" loading="lazy" decoding="async">`
+    : `<span class="ph ph-letter" style="--h:${hue}">${escapeHtml(letter)}</span>`;
 
   const card = document.createElement("article");
   card.className = "station" + (isPlaying ? " playing" : "");
@@ -227,14 +305,14 @@ function stationCard(station) {
   card.innerHTML = `
     <button class="station-logo" type="button" data-action="play"
       aria-label="Reproducir ${escapeHtml(station.name)}">
-      ${logo}${ph}
+      ${logoInner}
     </button>
     <div class="station-meta" data-action="play" role="button" tabindex="0"
       aria-label="Reproducir ${escapeHtml(station.name)}">
       <div class="station-name">${escapeHtml(station.name)}</div>
       <div class="station-sub">
         <i class="bx bx-signal-2"></i>
-        <span>${escapeHtml(station.codec || "stream")} · ${escapeHtml(station.language || "ES")}</span>
+        <span>${escapeHtml(station.codec || "stream")}${station.bitrate ? " · " + station.bitrate + " kbps" : ""} · ${escapeHtml(station.lang || "es")}</span>
       </div>
     </div>
     <button class="fav-btn ${isFav ? "on" : ""}" type="button" data-action="fav"
@@ -243,6 +321,22 @@ function stationCard(station) {
       <i class="bx ${isFav ? "bxs-heart" : "bx-heart"}"></i>
     </button>
   `;
+
+  // Si el logo falla (404, mixto…), se sustituye por el avatar con la inicial.
+  const img = card.querySelector(".station-logo img");
+  if (img) {
+    img.addEventListener(
+      "error",
+      () => {
+        const span = document.createElement("span");
+        span.className = "ph ph-letter";
+        span.style.setProperty("--h", String(hue));
+        span.textContent = letter;
+        img.replaceWith(span);
+      },
+      { once: true }
+    );
+  }
 
   // Delegación de clics dentro de la tarjeta.
   card.addEventListener("click", (e) => {
@@ -263,11 +357,14 @@ function stationCard(station) {
   return card;
 }
 
-/** Pinta la lista completa en el DOM. */
+/** Pinta la lista en el DOM respetando el nº de tarjetas ya expandidas. */
 function renderStations() {
   const listEl = el.stationList;
   listEl.innerHTML = "";
   const visible = getVisibleStations();
+
+  updateTotalCount(visible.length);
+  updateLoadMore(visible.length);
 
   if (visible.length === 0) {
     const empty = document.createElement("div");
@@ -281,10 +378,52 @@ function renderStations() {
 
   // Fragment para un único repintado eficiente.
   const frag = document.createDocumentFragment();
-  visible.forEach((s) => frag.appendChild(stationCard(s)));
+  const count = Math.min(state.renderedCount, visible.length);
+  for (let i = 0; i < count; i++) frag.appendChild(stationCard(visible[i]));
   listEl.appendChild(frag);
+}
 
-  updateFavCount();
+/** Reinicia el render a la primera tanda (cambio de pestaña/búsqueda). */
+function resetRender() {
+  state.renderedCount = RENDER_PAGE;
+  renderStations();
+}
+
+/** Añade la siguiente tanda de tarjetas al final de la lista. */
+function appendNextPage() {
+  const visible = getVisibleStations();
+  if (state.renderedCount >= visible.length) {
+    updateLoadMore(visible.length);
+    return;
+  }
+  const frag = document.createDocumentFragment();
+  const end = Math.min(state.renderedCount + RENDER_PAGE, visible.length);
+  for (let i = state.renderedCount; i < end; i++) {
+    frag.appendChild(stationCard(visible[i]));
+  }
+  el.stationList.appendChild(frag);
+  state.renderedCount = end;
+  updateLoadMore(visible.length);
+}
+
+/** Muestra/oculta el botón "Cargar más" según queden emisoras por pintar. */
+function updateLoadMore(visibleLength = getVisibleStations().length) {
+  const remaining = visibleLength - state.renderedCount;
+  const more = remaining > 0 && state.renderedCount > 0;
+  el.loadMore.hidden = !more;
+  if (more) {
+    el.loadMore.textContent = `Cargar más (${remaining} restantes)`;
+  }
+}
+
+/** Actualiza el contador de la pestaña "Todas". */
+function updateTotalCount(count = state.stations.length) {
+  if (count > 0) {
+    el.totalCount.hidden = false;
+    el.totalCount.textContent = count > 99 ? count.toLocaleString("es-ES") : String(count);
+  } else {
+    el.totalCount.hidden = true;
+  }
 }
 
 /** Actualiza el contador de favoritos de la pestaña. */
@@ -296,6 +435,19 @@ function updateFavCount() {
     badge.textContent = count > 99 ? "99+" : count;
   } else {
     badge.hidden = true;
+  }
+}
+
+/** Marca quirúrgicamente la tarjeta en reproducción (sin repintar la lista). */
+function updatePlayingCard() {
+  el.stationList
+    .querySelectorAll(".station.playing")
+    .forEach((c) => c.classList.remove("playing"));
+  if (state.current) {
+    const card = el.stationList.querySelector(
+      `.station[data-id="${CSS.escape(state.current.id)}"]`
+    );
+    card?.classList.add("playing");
   }
 }
 
@@ -312,7 +464,7 @@ function toggleFavorite(id) {
   writeStorage(STORAGE_KEYS.favorites, state.favorites);
 
   // Actualiza el estado visual del botón en la tarjeta (si existe).
-  const card = el.stationList.querySelector(`.station[data-id="${id}"]`);
+  const card = el.stationList.querySelector(`.station[data-id="${CSS.escape(id)}"]`);
   if (card) {
     const btn = card.querySelector(".fav-btn");
     const icon = btn.querySelector("i");
@@ -337,18 +489,33 @@ async function playStation(id) {
   const station = state.stations.find((s) => s.id === id);
   if (!station) return;
 
-  // Si ya está sonando, solo reanudamos/ponemos play.
-  if (state.current?.id === id && !el.audio.paused) return;
+  // Si ya es la emisora actual: reanudar si está en pausa.
+  if (state.current?.id === id) {
+    if (el.audio.paused) {
+      try {
+        await el.audio.play();
+      } catch (err) {
+        console.warn("No se pudo reanudar la reproducción:", err);
+        setPlayerStatus("Toca de nuevo para reproducir");
+      }
+    }
+    return;
+  }
 
   state.current = station;
-  updatePlayerUI(station, "Cargando…");
-  renderStations(); // marca la tarjeta activa
+  // Streams a probar: el principal y luego los alternativos del catálogo.
+  state.currentUrls = [station.url, ...(station.alt || [])].filter(
+    (u, i, arr) => isValidStream(u) && arr.indexOf(u) === i
+  );
+  state.currentUrlIdx = 0;
 
-  // Prepara la fuente del <audio>, con soporte HLS (.m3u8) vía hls.js.
-  await setAudioSource(station.url);
+  updatePlayerUI(station, "Cargando…");
+  updatePlayingCard();
+
+  await setAudioSource(state.currentUrls[0]);
 
   try {
-    el.audio.play();
+    await el.audio.play();
   } catch (err) {
     console.warn("No se pudo iniciar la reproducción:", err);
     setPlayerStatus("Toca de nuevo para reproducir");
@@ -361,51 +528,43 @@ async function playStation(id) {
  * - Resto de formatos (mp3, aac, ogg…) → nativo HTML5.
  */
 function setAudioSource(url) {
-  // Limpia cualquier listener previo de timeupdate/error.
-  el.audio.onerror = null;
-
-  const isHls =
-    /\.m3u8/i.test(url) ||
-    (el.audio.canPlayType("application/vnd.apple.mpegurl") === "" &&
-      url.includes("m3u8"));
+  const isHls = /\.m3u8(\?|$)/i.test(url) || url.toLowerCase().includes("m3u8");
 
   if (isHls) {
     // Reproducción nativa HLS (iOS/Safari modernos).
     if (el.audio.canPlayType("application/vnd.apple.mpegurl")) {
       el.audio.src = url;
-      el.audio.onerror = handleAudioError;
       return Promise.resolve();
     }
     // Resto: cargar hls.js desde CDN de forma dinámica.
     return new Promise((resolve, reject) => {
-      loadScript(
-        "https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"
-      ).then(() => {
-        if (!window.Hls) {
-          reject(new Error("hls.js no disponible"));
-          return;
-        }
-        if (window.Hls.isSupported()) {
-          const hls = new window.Hls({ enableWorker: true });
-          hls.loadSource(url);
-          hls.attachMedia(el.audio);
-          hls.on(window.Hls.Events.ERROR, (_evt, data) => {
-            if (data.fatal) handleAudioError();
-          });
-          resolve();
-        } else {
-          // Último recurso: dejar que el navegador lo intente de forma nativa.
-          el.audio.src = url;
-          el.audio.onerror = handleAudioError;
-          resolve();
-        }
-      }, reject);
+      loadScript("https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js").then(
+        () => {
+          if (!window.Hls) {
+            reject(new Error("hls.js no disponible"));
+            return;
+          }
+          if (window.Hls.isSupported()) {
+            const hls = new window.Hls({ enableWorker: true });
+            hls.loadSource(url);
+            hls.attachMedia(el.audio);
+            hls.on(window.Hls.Events.ERROR, (_evt, data) => {
+              if (data.fatal) handleAudioError();
+            });
+            resolve();
+          } else {
+            // Último recurso: dejar que el navegador lo intente de forma nativa.
+            el.audio.src = url;
+            resolve();
+          }
+        },
+        reject
+      );
     });
   }
 
   // Stream normal (mp3/aac/ogg…).
   el.audio.src = url;
-  el.audio.onerror = handleAudioError;
   return Promise.resolve();
 }
 
@@ -427,8 +586,10 @@ function stopPlayback() {
   el.audio.removeAttribute("src");
   el.audio.load();
   state.current = null;
+  state.currentUrls = [];
+  state.currentUrlIdx = 0;
   resetPlayerUI();
-  renderStations();
+  updatePlayingCard();
 }
 
 /** Alterna reproducir/pausar la emisora actual. */
@@ -441,8 +602,22 @@ function togglePlayPause() {
   }
 }
 
-/** Manejador común de errores del stream. */
+/**
+ * Manejador de errores del stream: antes de rendirse, prueba las URLs
+ * alternativas de la emisora (el catálogo incluye varias cuando existen).
+ */
 function handleAudioError() {
+  if (
+    state.current &&
+    state.currentUrlIdx < state.currentUrls.length - 1
+  ) {
+    state.currentUrlIdx += 1;
+    setPlayerStatus("Probando otra conexión…");
+    setAudioSource(state.currentUrls[state.currentUrlIdx])
+      .then(() => el.audio.play())
+      .catch(() => setPlayerStatus("Error de conexión con la emisora"));
+    return;
+  }
   setPlayerStatus("Error de conexión con la emisora");
   console.warn("Error de audio para:", state.current?.name);
 }
@@ -451,29 +626,47 @@ function handleAudioError() {
 function updatePlayerUI(station, statusText) {
   el.player.hidden = false;
   el.playerTitle.textContent = station.name;
+  setPlayerArt(station);
+  setPlayerStatus(statusText || "Preparado");
+  updatePlayPauseIcon();
+}
 
+/** Coloca el logo (o avatar con inicial) del reproductor. */
+function setPlayerArt(station) {
   const img = el.playerImg;
   const ph = el.player.querySelector(".placeholder-icon");
+  const letterBox = el.playerLetter;
+
   if (station.favicon) {
     img.src = station.favicon;
     img.alt = "Logotipo de " + station.name;
     img.style.display = "block";
     ph.style.display = "none";
+    letterBox.hidden = true;
   } else {
+    img.removeAttribute("src");
     img.style.display = "none";
-    ph.style.display = "grid";
+    ph.style.display = "none";
+    showPlayerLetter(station);
   }
+}
 
-  setPlayerStatus(statusText || "Preparado");
-  updatePlayPauseIcon();
+/** Muestra el avatar con la inicial en el reproductor. */
+function showPlayerLetter(station) {
+  const { letter, hue } = letterAvatar(station.name);
+  el.playerLetter.style.setProperty("--h", String(hue));
+  el.playerLetter.textContent = letter;
+  el.playerLetter.hidden = false;
 }
 
 /** Resetea el panel inferior al estado inicial. */
 function resetPlayerUI() {
   el.playerTitle.textContent = "Sin emisora";
   setPlayerStatus("Pulsa para escuchar");
+  el.playerImg.removeAttribute("src");
   el.playerImg.style.display = "none";
   el.player.querySelector(".placeholder-icon").style.display = "grid";
+  el.playerLetter.hidden = true;
   el.playerNow.hidden = true;
   updatePlayPauseIcon();
 }
@@ -526,7 +719,7 @@ function updateMediaSession() {
     return;
   }
   const artwork = state.current.favicon
-    ? [{ src: state.current.favicon, sizes: "512x512", type: "image/png" }]
+    ? [{ src: state.current.favicon, sizes: "512x512" }]
     : [];
   navigator.mediaSession.metadata = new MediaMetadata({
     title: state.current.name,
@@ -568,13 +761,16 @@ function cacheElements() {
     searchInput: document.getElementById("search-input"),
     searchClear: document.getElementById("search-clear"),
     stationList: document.getElementById("station-list"),
+    loadMore: document.getElementById("load-more"),
     skeleton: document.getElementById("skeleton"),
     status: document.getElementById("status"),
     favCount: document.getElementById("fav-count"),
+    totalCount: document.getElementById("total-count"),
     player: document.getElementById("player"),
     playerTitle: document.getElementById("player-title"),
     playerStatus: document.getElementById("player-status"),
     playerImg: document.getElementById("player-img"),
+    playerLetter: document.getElementById("player-letter"),
     playerNow: document.getElementById("player-now"),
     playerStop: document.getElementById("player-stop"),
     playPause: document.getElementById("player-playpause"),
@@ -603,27 +799,52 @@ function bindEvents() {
         t.classList.toggle("active", active);
         t.setAttribute("aria-selected", String(active));
       });
-      renderStations();
+      resetRender();
     });
   });
 
-  // Buscador (filtro en vivo).
+  // Buscador (filtro en vivo, con pequeño debounce).
+  let searchTimer = null;
   el.searchInput.addEventListener("input", (e) => {
-    state.query = e.target.value.trim();
-    el.searchClear.hidden = !state.query;
-    renderStations();
+    const value = e.target.value.trim();
+    el.searchClear.hidden = !value;
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => {
+      state.query = value;
+      resetRender();
+    }, SEARCH_DEBOUNCE);
   });
   el.searchClear.addEventListener("click", () => {
     el.searchInput.value = "";
-    state.query = "";
     el.searchClear.hidden = true;
-    renderStations();
+    state.query = "";
+    resetRender();
     el.searchInput.focus();
   });
+
+  // "Cargar más" manual + automático al llegar al final.
+  el.loadMore.addEventListener("click", appendNextPage);
+  if ("IntersectionObserver" in window) {
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((en) => en.isIntersecting)) appendNextPage();
+      },
+      { rootMargin: "700px 0px" }
+    );
+    io.observe(el.loadMore);
+  }
 
   // Controles del reproductor.
   el.playPause.addEventListener("click", togglePlayPause);
   el.playerStop.addEventListener("click", stopPlayback);
+
+  // Si el logo del reproductor falla → avatar con la inicial.
+  el.playerImg.addEventListener("error", () => {
+    if (state.current) {
+      el.playerImg.style.display = "none";
+      showPlayerLetter(state.current);
+    }
+  });
 
   // Estado del audio → sincroniza iconos y Media Session.
   el.audio.addEventListener("playing", () => {
@@ -644,7 +865,11 @@ function bindEvents() {
   });
 }
 
-/** Punto de entrada principal. */
+/**
+ * Arranque:
+ * 1. Catálogo embebido (instantáneo, funciona offline tras la 1ª visita).
+ * 2. Si no existe → API en vivo con renderizado progresivo.
+ */
 async function init() {
   cacheElements();
   applyTheme(getInitialTheme());
@@ -652,29 +877,57 @@ async function init() {
 
   // Recupera favoritos guardados.
   state.favorites = readStorage(STORAGE_KEYS.favorites, []);
+  if (!Array.isArray(state.favorites)) state.favorites = [];
   updateFavCount();
 
   // Registrar SW y Media Session antes de cargar datos.
   setupServiceWorker();
   setupMediaSession();
 
-  // Carga las emisoras desde la API.
   el.skeleton.hidden = false;
   el.stationList.hidden = true;
-  showStatus("Conectando con radio-browser.info…");
 
+  // 1) Catálogo embebido.
+  const catalog = await loadEmbeddedCatalog();
+  if (catalog) {
+    state.stations = catalog;
+    state.renderedCount = RENDER_PAGE;
+    el.skeleton.hidden = true;
+    el.stationList.hidden = false;
+    renderStations();
+    console.log(`Radio ES: ${state.stations.length} emisoras del catálogo local.`);
+    return;
+  }
+
+  // 2) Respaldo: API en vivo.
+  showStatus("Conectando con radio-browser.info…");
+  let first = true;
   try {
-    state.stations = normalizeStations(await fetchStations());
+    const raw = await fetchStations((cumulative) => {
+      state.stations = normalizeStations(cumulative);
+      if (first && state.stations.length > 0) {
+        first = false;
+        el.skeleton.hidden = true;
+        el.stationList.hidden = false;
+        showStatus("");
+        state.renderedCount = RENDER_PAGE;
+      }
+      if (!first) renderStations();
+    });
+    state.stations = normalizeStations(raw);
     el.skeleton.hidden = true;
     el.stationList.hidden = false;
     showStatus("");
-    renderStations();
-    console.log(`Radio ES: ${state.stations.length} emisoras cargadas.`);
+    if (first) {
+      state.renderedCount = RENDER_PAGE;
+      renderStations();
+    }
+    console.log(`Radio ES: ${state.stations.length} emisoras de radio-browser.info.`);
   } catch (err) {
     console.error("Error cargando emisoras:", err);
     el.skeleton.hidden = true;
     showStatus(
-      "No se pudo conectar con radio-browser.info. Comprueba tu conexión e inténtalo de nuevo.",
+      "No se pudo cargar el catálogo de emisoras. Comprueba tu conexión e inténtalo de nuevo.",
       "error"
     );
     el.stationList.hidden = false;

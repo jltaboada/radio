@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 
   <!-- Meta / SEO -->
-  <meta name="description" content="Reproductor PWA de emisoras de radio españolas online. Escucha miles de radios de España en tu móvil." />
+  <meta name="description" content="Reproductor PWA de emisoras de radio españolas online. Catálogo de ~1000 radios de toda España con logos, escúchalas en directo desde tu móvil." />
   <meta name="theme-color" content="#1e1e2e" id="meta-theme-color" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -58,10 +58,11 @@
     <nav class="tabs" role="tablist" aria-label="Secciones">
       <button class="tab active" data-tab="all" role="tab" aria-selected="true" type="button">
         <i class="bx bx-radio" aria-hidden="true"></i><span>Todas</span>
+        <span class="tab-badge" id="total-count" hidden>0</span>
       </button>
       <button class="tab" data-tab="favs" role="tab" aria-selected="false" type="button">
         <i class="bx bx-heart" aria-hidden="true"></i><span>Favoritas</span>
-        <span class="fav-count" id="fav-count" hidden>0</span>
+        <span class="tab-badge" id="fav-count" hidden>0</span>
       </button>
     </nav>
 
@@ -70,6 +71,11 @@
 
     <!-- Listado de emisoras -->
     <section class="station-list" id="station-list" aria-live="polite"></section>
+
+    <!-- Cargar más emisoras (render progresivo) -->
+    <div class="load-more-wrap">
+      <button id="load-more" class="load-more" type="button" hidden>Cargar más</button>
+    </div>
 
     <!-- Skeleton de carga -->
     <section class="skeleton" id="skeleton" aria-hidden="true">
@@ -87,6 +93,7 @@
     <div class="player-art" id="player-art">
       <img id="player-img" src="" alt="" />
       <i class="bx bx-radio placeholder-icon" aria-hidden="true"></i>
+      <span class="ph-letter" id="player-letter" hidden></span>
     </div>
     <div class="player-info">
       <span id="player-title" class="player-title">Sin emisora</span>

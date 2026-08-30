@@ -81,6 +81,9 @@ html[data-theme="light"] {
 
 html {
   -webkit-text-size-adjust: 100%;
+  /* Evita el scroll horizontal residual en pantallas estrechas
+     ("clip" no crea contenedor de scroll y no rompe el header sticky). */
+  overflow-x: clip;
 }
 
 body {
@@ -111,6 +114,12 @@ button {
 
 i {
   line-height: 1;
+}
+
+/* Foco visible accesible con teclado. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /* ---------------------------------------------------------------------------
@@ -216,13 +225,20 @@ i {
   font-size: 1.1rem;
 }
 
-/* ---------------------------------------------------------------------------
+/* --------------------------------------------------------------------------- 
    Tabs
    ------------------------------------------------------------------------- */
 .tabs {
   display: flex;
   gap: 8px;
   padding: 0 18px 14px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .tab {
@@ -247,7 +263,7 @@ i {
   color: #fff;
 }
 
-.fav-count {
+.tab-badge {
   display: inline-grid;
   place-items: center;
   min-width: 20px;
@@ -257,6 +273,12 @@ i {
   background: rgba(255, 255, 255, 0.25);
   font-size: 0.72rem;
   font-weight: 700;
+}
+
+.tab:not(.active) .tab-badge {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
 }
 
 /* ---------------------------------------------------------------------------
@@ -272,6 +294,7 @@ i {
   display: flex;
   align-items: center;
   gap: 8px;
+  overflow-wrap: anywhere; /* mensajes largos sin desbordar */
 }
 
 .status.error {
@@ -314,6 +337,9 @@ i {
   box-shadow: var(--shadow);
   transition: transform 0.12s ease, border-color var(--transition);
   animation: fadeUp 0.3s ease both;
+  /* Con ~1000 emisoras: el navegador solo pinta las tarjetas visibles. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 68px;
 }
 
 @keyframes fadeUp {
@@ -355,6 +381,28 @@ i {
   background: var(--surface-2);
 }
 
+/* Avatar con la inicial cuando la emisora no tiene logo (o falla al cargar). */
+.ph-letter {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-weight: 800;
+  font-size: 1.15rem;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  background: linear-gradient(
+    135deg,
+    hsl(var(--h, 7) 62% 52%),
+    hsl(calc(var(--h, 7) + 45) 62% 40%)
+  );
+  user-select: none;
+}
+
+.player-art .ph-letter {
+  font-size: 1.3rem;
+}
+
 .station-meta {
   flex: 1;
   min-width: 0;
@@ -377,6 +425,13 @@ i {
   color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
+}
+
+/* Sin min-width:0 el texto largo desbordaría la tarjeta en pantallas estrechas. */
+.station-sub span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .station-sub .bx {
@@ -409,12 +464,38 @@ i {
   text-align: center;
   padding: 48px 20px;
   color: var(--text-muted);
+  overflow-wrap: anywhere; /* búsquedas largas sin desbordar */
 }
 
 .empty-state i {
   font-size: 2.6rem;
   display: block;
   margin-bottom: 12px;
+}
+
+/* ---------------------------------------------------------------------------
+   Botón "Cargar más" (render progresivo)
+   ------------------------------------------------------------------------- */
+.load-more-wrap {
+  display: flex;
+  justify-content: center;
+  padding: 6px 18px 10px;
+}
+
+.load-more {
+  padding: 12px 22px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  font-weight: 600;
+  box-shadow: var(--shadow);
+  transition: transform 0.12s ease, color var(--transition);
+}
+
+.load-more:active {
+  transform: scale(0.97);
 }
 
 /* ---------------------------------------------------------------------------
@@ -575,8 +656,15 @@ i {
 @media (min-width: 640px) {
   .station-list,
   .search-wrap,
-  .tabs {
+  .tabs,
+  .load-more-wrap {
     max-width: 620px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .status {
+    max-width: 584px;
     margin-left: auto;
     margin-right: auto;
   }
@@ -593,5 +681,74 @@ i {
     right: auto;
     transform: translateX(-50%);
     width: calc(100% - 20px);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Pantallas muy estrechas (≤360 px): compacto y sin desbordes
+   ------------------------------------------------------------------------- */
+@media (max-width: 360px) {
+  .app-header {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .brand-title {
+    font-size: 1.2rem;
+  }
+
+  .search-wrap,
+  .tabs,
+  .station-list,
+  .load-more-wrap {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .status {
+    margin-left: 12px;
+    margin-right: 12px;
+  }
+
+  .station {
+    gap: 10px;
+    padding: 8px 10px;
+  }
+
+  .station-logo {
+    width: 42px;
+    height: 42px;
+    border-radius: 10px;
+  }
+
+  .fav-btn {
+    width: 34px;
+    height: 34px;
+    font-size: 1.2rem;
+  }
+
+  .player {
+    left: 6px;
+    right: 6px;
+    gap: 10px;
+    padding: 8px 10px;
+  }
+
+  .player-art {
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+  }
+
+  .player-btn {
+    width: 40px;
+    height: 40px;
+    font-size: 1.25rem;
+  }
+
+  .player-btn.primary {
+    width: 46px;
+    height: 46px;
+    font-size: 1.5rem;
   }
 }

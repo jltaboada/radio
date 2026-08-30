@@ -6,7 +6,7 @@
 
 "use strict";
 
-const CACHE_VERSION = "radioes-v1";
+const CACHE_VERSION = "radioes-v2";
 const CACHE_NAME = `${CACHE_VERSION}-ui`;
 
 // Activos precacheados al instalar (todas rutas relativas, funcionan
@@ -68,6 +68,26 @@ self.addEventListener("fetch", (event) => {
   // Peticiones a otros orígenes (CDN de iconos, hls.js, streams, API):
   // pasar directamente a la red, sin caché. Así nunca cacheamos audio.
   if (url.origin !== self.location.origin) return;
+
+  // Catálogo de emisoras: "stale-while-revalidate". Se sirve la copia
+  // caché al instante y se actualiza en segundo plano para la próxima vez.
+  if (url.pathname.endsWith("/stations.json")) {
+    event.respondWith(
+      caches.match(request).then((cached) => {
+        const network = fetch(request)
+          .then((response) => {
+            if (response.ok) {
+              const copy = response.clone();
+              caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+            }
+            return response;
+          })
+          .catch(() => cached);
+        return cached || network;
+      })
+    );
+    return;
+  }
 
   // Navegaciones (documentos HTML): red primero, con respaldo de caché.
   if (request.mode === "navigate") {
