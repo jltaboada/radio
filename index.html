@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+
+  <!-- Meta / SEO -->
+  <meta name="description" content="Reproductor PWA de emisoras de radio españolas online. Escucha miles de radios de España en tu móvil." />
+  <meta name="theme-color" content="#1e1e2e" id="meta-theme-color" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Radio ES" />
+
+  <!-- Favicon -->
+  <link rel="icon" href="./icons/icon-192.png" type="image/png" />
+
+  <!-- PWA -->
+  <link rel="manifest" href="./manifest.json" />
+  <link rel="apple-touch-icon" href="./icons/icon-192.png" />
+
+  <!-- Icons (Boxicons - variantes "line" monocromas) -->
+  <link rel="stylesheet" href="https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css" />
+
+  <title>Radio ES — Radio española online</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <span class="brand-dot" aria-hidden="true"></span>
+      <h1 class="brand-title">Radio <span>ES</span></h1>
+    </div>
+    <button id="theme-toggle" class="icon-btn" type="button" aria-label="Cambiar tema claro/oscuro" title="Cambiar tema">
+      <i class="bx bx-moon" aria-hidden="true"></i>
+    </button>
+  </header>
+
+  <main class="app-main">
+    <!-- Buscador -->
+    <div class="search-wrap">
+      <div class="search-box">
+        <i class="bx bx-search" aria-hidden="true"></i>
+        <input
+          type="search"
+          id="search-input"
+          placeholder="Buscar emisora por nombre…"
+          autocomplete="off"
+          aria-label="Buscar emisoras"
+        />
+        <button id="search-clear" class="search-clear" type="button" aria-label="Limpiar búsqueda" hidden>
+          <i class="bx bx-x" aria-hidden="true"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <nav class="tabs" role="tablist" aria-label="Secciones">
+      <button class="tab active" data-tab="all" role="tab" aria-selected="true" type="button">
+        <i class="bx bx-radio" aria-hidden="true"></i><span>Todas</span>
+      </button>
+      <button class="tab" data-tab="favs" role="tab" aria-selected="false" type="button">
+        <i class="bx bx-heart" aria-hidden="true"></i><span>Favoritas</span>
+        <span class="fav-count" id="fav-count" hidden>0</span>
+      </button>
+    </nav>
+
+    <!-- Estado / mensajes -->
+    <div id="status" class="status" role="status" hidden></div>
+
+    <!-- Listado de emisoras -->
+    <section class="station-list" id="station-list" aria-live="polite"></section>
+
+    <!-- Skeleton de carga -->
+    <section class="skeleton" id="skeleton" aria-hidden="true">
+      <div class="sk-card"></div>
+      <div class="sk-card"></div>
+      <div class="sk-card"></div>
+      <div class="sk-card"></div>
+      <div class="sk-card"></div>
+      <div class="sk-card"></div>
+    </section>
+  </main>
+
+  <!-- Reproductor persistente -->
+  <footer class="player" id="player" hidden>
+    <div class="player-art" id="player-art">
+      <img id="player-img" src="" alt="" />
+      <i class="bx bx-radio placeholder-icon" aria-hidden="true"></i>
+    </div>
+    <div class="player-info">
+      <span id="player-title" class="player-title">Sin emisora</span>
+      <span id="player-status" class="player-status">Pulsa para escuchar</span>
+      <div class="player-now" id="player-now" hidden>
+        <i class="bx bx-volume-full" aria-hidden="true"></i>
+        <span id="player-now-text">Reproduciendo en directo</span>
+      </div>
+    </div>
+    <div class="player-controls">
+      <button id="player-stop" class="player-btn" type="button" aria-label="Detener" title="Detener">
+        <i class="bx bx-stop" aria-hidden="true"></i>
+      </button>
+      <button id="player-playpause" class="player-btn primary" type="button" aria-label="Reproducir / Pausar" title="Reproducir / Pausar">
+        <i class="bx bx-play" aria-hidden="true"></i>
+      </button>
+    </div>
+  </footer>
+
+  <!-- Elemento de audio -->
+  <audio id="audio" preload="none"></audio>
+
+  <script src="./app.js" defer></script>
+</body>
+</html>

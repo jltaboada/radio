@@ -1,0 +1,33 @@
+{
+  "name": "Radio ES — Reproductor de radio española online",
+  "short_name": "Radio ES",
+  "description": "Escucha miles de emisoras de radio españolas en directo, de forma gratuita y desde cualquier móvil.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#16161e",
+  "theme_color": "#e23a3a",
+  "lang": "es",
+  "categories": ["music", "entertainment", "news"],
+  "icons": [
+    {
+      "src": "./icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
