@@ -1,7 +1,7 @@
 {
   "name": "Radio ES — Reproductor de radio española online",
   "short_name": "Radio ES",
-  "description": "Escucha miles de emisoras de radio españolas en directo, de forma gratuita y desde cualquier móvil.",
+  "description": "Escucha cerca de 1000 emisoras de radio españolas en directo, de forma gratuita y desde cualquier móvil.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
