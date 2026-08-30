@@ -1,0 +1,597 @@
+/* ============================================================================
+   Radio ES — PWA reproductor de radio española
+   CSS Mobile-First con variables de color para tema claro/oscuro.
+   Sin frameworks: CSS nativo.
+   ========================================================================== */
+
+/* ---------------------------------------------------------------------------
+   Variables de tema (claro / oscuro)
+   ------------------------------------------------------------------------- */
+:root {
+  /* Paleta base compartida */
+  --accent: #e23a3a;            /* rojo vivo, recuerda a la radio broadcast */
+  --accent-soft: #fbe3e3;
+  --radius: 16px;
+  --radius-sm: 10px;
+  --player-h: 76px;             /* altura reproductor fijo */
+  --transition: 0.22s ease;
+
+  /* Modo claro (predeterminado) */
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --surface-2: #eceef1;
+  --text: #1c1f26;
+  --text-muted: #6b7280;
+  --border: #e5e7eb;
+  --shadow: 0 6px 24px rgba(28, 31, 38, 0.08);
+  --player-bg: rgba(255, 255, 255, 0.92);
+}
+
+/* Modo oscuro: aplicado automáticamente por detección del sistema … */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16161e;
+    --surface: #21212b;
+    --surface-2: #2a2a36;
+    --text: #eceef2;
+    --text-muted: #9aa0ab;
+    --border: #33333f;
+    --shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+    --player-bg: rgba(30, 30, 40, 0.92);
+    --accent-soft: #3a2222;
+  }
+}
+
+/* … o forzado por el usuario (clase en <html>). Reglas redundantes para
+   garantizar que la clase del usuario gane a la media query. */
+html[data-theme="dark"] {
+  --bg: #16161e;
+  --surface: #21212b;
+  --surface-2: #2a2a36;
+  --text: #eceef2;
+  --text-muted: #9aa0ab;
+  --border: #33333f;
+  --shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  --player-bg: rgba(30, 30, 40, 0.92);
+  --accent-soft: #3a2222;
+}
+
+html[data-theme="light"] {
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --surface-2: #eceef1;
+  --text: #1c1f26;
+  --text-muted: #6b7280;
+  --border: #e5e7eb;
+  --shadow: 0 6px 24px rgba(28, 31, 38, 0.08);
+  --player-bg: rgba(255, 255, 255, 0.92);
+  --accent-soft: #fbe3e3;
+}
+
+/* ---------------------------------------------------------------------------
+   Reset y base
+   ------------------------------------------------------------------------- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.4;
+  min-height: 100dvh;
+  -webkit-tap-highlight-color: transparent;
+  transition: background var(--transition), color var(--transition);
+  /* Deja espacio para el reproductor fijo */
+  padding-bottom: calc(var(--player-h) + env(safe-area-inset-bottom) + 24px);
+}
+
+img {
+  max-width: 100%;
+  display: block;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: inherit;
+}
+
+i {
+  line-height: 1;
+}
+
+/* ---------------------------------------------------------------------------
+   Cabecera
+   ------------------------------------------------------------------------- */
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: calc(14px + env(safe-area-inset-top)) 18px 14px;
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-soft);
+}
+
+.brand-title {
+  font-size: 1.35rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.brand-title span {
+  color: var(--accent);
+}
+
+.icon-btn {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--surface-2);
+  font-size: 1.4rem;
+  transition: background var(--transition), transform 0.15s ease;
+}
+
+.icon-btn:active {
+  transform: scale(0.92);
+}
+
+/* ---------------------------------------------------------------------------
+   Buscador
+   ------------------------------------------------------------------------- */
+.search-wrap {
+  padding: 0 18px 14px;
+}
+
+.search-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0 14px;
+  height: 48px;
+  box-shadow: var(--shadow);
+  color: var(--text-muted);
+}
+
+.search-box .bx-search {
+  font-size: 1.25rem;
+}
+
+.search-box input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.search-box input::placeholder {
+  color: var(--text-muted);
+}
+
+.search-clear {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  color: var(--text-muted);
+  font-size: 1.1rem;
+}
+
+/* ---------------------------------------------------------------------------
+   Tabs
+   ------------------------------------------------------------------------- */
+.tabs {
+  display: flex;
+  gap: 8px;
+  padding: 0 18px 14px;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 16px;
+  border-radius: 999px;
+  font-size: 0.92rem;
+  font-weight: 600;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  transition: background var(--transition), color var(--transition);
+}
+
+.tab i {
+  font-size: 1.1rem;
+}
+
+.tab.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.fav-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.25);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+/* ---------------------------------------------------------------------------
+   Estado / mensajes
+   ------------------------------------------------------------------------- */
+.status {
+  margin: 0 18px 14px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status.error {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.status .spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--text-muted);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ---------------------------------------------------------------------------
+   Listado de emisoras
+   ------------------------------------------------------------------------- */
+.station-list {
+  display: grid;
+  gap: 8px;
+  padding: 0 18px;
+}
+
+.station {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  box-shadow: var(--shadow);
+  transition: transform 0.12s ease, border-color var(--transition);
+  animation: fadeUp 0.3s ease both;
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.station:active {
+  transform: scale(0.985);
+}
+
+.station.playing {
+  border-color: var(--accent);
+}
+
+.station-logo {
+  width: 46px;
+  height: 46px;
+  border-radius: 12px;
+  background: var(--surface-2);
+  overflow: hidden;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.station-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.station-logo .ph {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+  font-size: 1.5rem;
+  background: var(--surface-2);
+}
+
+.station-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.station-name {
+  font-weight: 600;
+  font-size: 0.98rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.station-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.station-sub .bx {
+  font-size: 0.9rem;
+  color: var(--accent);
+}
+
+.fav-btn {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  font-size: 1.35rem;
+  color: var(--text-muted);
+  transition: color var(--transition), transform 0.15s ease;
+}
+
+.fav-btn:active {
+  transform: scale(0.85);
+}
+
+.fav-btn.on {
+  color: var(--accent);
+}
+
+.empty-state {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 48px 20px;
+  color: var(--text-muted);
+}
+
+.empty-state i {
+  font-size: 2.6rem;
+  display: block;
+  margin-bottom: 12px;
+}
+
+/* ---------------------------------------------------------------------------
+   Skeleton (carga)
+   ------------------------------------------------------------------------- */
+.skeleton {
+  display: grid;
+  gap: 8px;
+  padding: 0 18px;
+}
+
+.sk-card {
+  height: 68px;
+  border-radius: var(--radius);
+  background: linear-gradient(
+    90deg,
+    var(--surface) 25%,
+    var(--surface-2) 50%,
+    var(--surface) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.2s infinite;
+}
+
+@keyframes shimmer {
+  to { background-position: -200% 0; }
+}
+
+/* ---------------------------------------------------------------------------
+   Reproductor fijo (parte inferior)
+   ------------------------------------------------------------------------- */
+.player {
+  position: fixed;
+  left: 10px;
+  right: 10px;
+  bottom: calc(10px + env(safe-area-inset-bottom));
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--player-bg);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+}
+
+.player-art {
+  width: 52px;
+  height: 52px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--surface-2);
+  position: relative;
+  flex-shrink: 0;
+}
+
+.player-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.player-art .placeholder-icon {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+  font-size: 1.7rem;
+}
+
+.player-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.player-title {
+  font-weight: 700;
+  font-size: 0.95rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.player-status {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.player-now {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 4px;
+  font-size: 0.72rem;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.player-now .bx {
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.player-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.player-btn {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 1.4rem;
+  transition: background var(--transition), transform 0.15s ease;
+}
+
+.player-btn:active {
+  transform: scale(0.9);
+}
+
+.player-btn.primary {
+  width: 52px;
+  height: 52px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 1.7rem;
+  box-shadow: 0 6px 16px var(--accent-soft);
+}
+
+/* ---------------------------------------------------------------------------
+   Utilidades
+   ------------------------------------------------------------------------- */
+[hidden] {
+  display: none !important;
+}
+
+/* ---------------------------------------------------------------------------
+   Pantallas grandes (mejora puntual, no esencial en mobile-first)
+   ------------------------------------------------------------------------- */
+@media (min-width: 640px) {
+  .station-list,
+  .search-wrap,
+  .tabs {
+    max-width: 620px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .app-main {
+    max-width: 620px;
+    margin: 0 auto;
+    width: 100%;
+  }
+
+  .player {
+    max-width: 620px;
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    width: calc(100% - 20px);
+  }
+}
